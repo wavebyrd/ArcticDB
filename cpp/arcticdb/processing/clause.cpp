@@ -2123,11 +2123,12 @@ MergeUpdateClause::MergeUpdateClause(
 ) :
     strategy_(strategy),
     source_(std::move(source)) {
-    auto [last_after_removal, last] = ranges::remove_if(on, [this](std::string_view column) {
-        auto [_, is_new_element] = on_set_.insert(column);
-        return !is_new_element;
-    });
-    on_ = std::vector(std::make_move_iterator(on.begin()), std::make_move_iterator(last_after_removal));
+    for (std::string& column : on) {
+        if (!on_set_.contains(column)) {
+            on.push_back(std::move(column));
+            on_set_.insert(on.back());
+        }
+    }
     user_input::check<ErrorCode::E_INVALID_USER_ARGUMENT>(
             strategy_.not_matched_by_target == MergeAction::DO_NOTHING, "Merge cannot perform insertion at the moment"
     );
@@ -2397,13 +2398,13 @@ bool MergeUpdateClause::update_and_insert(
                     // the map_ member of the pool is not populated. Which means that the mapping between a string
                     // and offset in the pool is missing. To get it, we need to rebuild the pool anyway.
                     segment_contains_string_column = true;
-                    const MergeUpdateStringColumnFlags colum_update_flags{
+                    const MergeUpdateStringColumnFlags column_update_flags{
                             .is_timeseries = is_timeseries,
                             .repool = on_set_.contains(target_field.name()) && strategy_.update_only()
                     };
                     row_slice_changed |= merge_update_string_column<ScalarType>(
                             target_column,
-                            colum_update_flags,
+                            column_update_flags,
                             rows_to_update,
                             target_field,
                             *row_ranges[segment_idx],
@@ -2512,7 +2513,7 @@ std::vector<std::vector<size_t>> MergeUpdateClause::filter_on_additional_columns
     if (index_match) {
         user_input::check<ErrorCode::E_INVALID_USER_ARGUMENT>(
                 (source_index_type == target_index_type) && (source_index_type == IndexDescriptor::Type::TIMESTAMP),
-                "Source and target index types to be both TIMESTAMP. Source: {}, target: {}",
+                "Source and target index types must both be TIMESTAMP. Source: {}, target: {}",
                 source_index_type,
                 target_index_type
         );
